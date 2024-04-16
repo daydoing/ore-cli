@@ -19,13 +19,10 @@ use std::sync::Arc;
 
 use clap::{command, Parser, Subcommand};
 use solana_client::nonblocking::rpc_client::RpcClient;
-use solana_sdk::{
-    commitment_config::CommitmentConfig,
-    signature::{read_keypair_file, Keypair},
-};
+use solana_sdk::{commitment_config::CommitmentConfig, signature::Keypair};
 
 struct Miner {
-    pub keypair_filepath: Option<String>,
+    pub private_key: String,
     pub priority_fee: u64,
     pub rpc_client: Arc<RpcClient>,
 }
@@ -41,22 +38,13 @@ struct Args {
     )]
     rpc: Option<String>,
 
-    #[clap(
-        global = true,
-        short = 'C',
-        long = "config",
-        id = "PATH",
-        help = "Filepath to config file."
-    )]
-    pub config_file: Option<String>,
-
     #[arg(
         long,
-        value_name = "KEYPAIR_FILEPATH",
-        help = "Filepath to keypair to use",
+        value_name = "PRIVATE_KEY",
+        help = "Private key to use",
         global = true
     )]
-    keypair: Option<String>,
+    private_key: Option<String>,
 
     #[arg(
         long,
@@ -177,27 +165,15 @@ struct UpdateDifficultyArgs {}
 async fn main() {
     let args = Args::parse();
 
-    // Load the config file from custom path, the default path, or use default config values
-    let cli_config = if let Some(config_file) = &args.config_file {
-        solana_cli_config::Config::load(config_file).unwrap_or_else(|_| {
-            eprintln!("error: Could not find config file `{}`", config_file);
-            std::process::exit(1);
-        })
-    } else if let Some(config_file) = &*solana_cli_config::CONFIG_FILE {
-        solana_cli_config::Config::load(config_file).unwrap_or_default()
-    } else {
-        solana_cli_config::Config::default()
-    };
-
     // Initialize miner.
-    let cluster = args.rpc.unwrap_or(cli_config.json_rpc_url);
-    let default_keypair = args.keypair.unwrap_or(cli_config.keypair_path);
+    let cluster = args.rpc.expect("");
+    let private_key = args.private_key.expect("");
     let rpc_client = RpcClient::new_with_commitment(cluster, CommitmentConfig::confirmed());
 
     let miner = Arc::new(Miner::new(
         Arc::new(rpc_client),
         args.priority_fee,
-        Some(default_keypair),
+        private_key,
     ));
 
     // Execute user command.
@@ -236,18 +212,15 @@ async fn main() {
 }
 
 impl Miner {
-    pub fn new(rpc_client: Arc<RpcClient>, priority_fee: u64, keypair_filepath: Option<String>) -> Self {
+    pub fn new(rpc_client: Arc<RpcClient>, priority_fee: u64, private_key: String) -> Self {
         Self {
             rpc_client,
-            keypair_filepath,
+            private_key,
             priority_fee,
         }
     }
 
     pub fn signer(&self) -> Keypair {
-        match self.keypair_filepath.clone() {
-            Some(filepath) => read_keypair_file(filepath).unwrap(),
-            None => panic!("No keypair provided"),
-        }
+        Keypair::from_base58_string(&self.private_key.trim())
     }
 }
